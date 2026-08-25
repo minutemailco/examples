@@ -25,21 +25,20 @@ function findUser(email) {
   return users.get(email);
 }
 
-function upsertOAuthUser({ sub, email, name, emailVerified, claims, picture, preferredUsername }) {
+function upsertOAuthUser({ sub, email, name, emailVerified, provider, claims, picture, preferredUsername }) {
   const existing = users.get(email);
   if (existing) {
-    existing.oauth = { sub, claims };
-    existing.emailVerified = existing.emailVerified || emailVerified;
+    existing.oauth = { sub, claims, provider };
     return existing;
   }
   const user = createUser({
     name: name || email,
     email,
     passwordHash: null,
-    provider: 'google',
+    provider, // 'custom' | 'google'
   });
   user.emailVerified = !!emailVerified;
-  user.oauth = { sub, claims };
+  user.oauth = { sub, claims, provider };
   return user;
 }
 

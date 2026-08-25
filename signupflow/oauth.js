@@ -1,19 +1,28 @@
 // OAuth client for the MinuteMail mock IdP: authorization-code flow with PKCE (S256).
+// Two providers are wired: a custom IdP (email verification enforced) and
+// Google (no verification step, fixed claim set).
 
 const crypto = require('crypto');
 const { createRemoteJWKSet, jwtVerify } = require('jose');
-const { OAUTH_ISSUER, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REDIRECT_URI } = require('./config');
+const { OAUTH_ISSUER, OAUTH_CUSTOM, OAUTH_GOOGLE, OAUTH_REDIRECT_BASE } = require('./config');
 
 const JWKS = createRemoteJWKSet(new URL('/jwks', OAUTH_ISSUER));
+
+// provider key -> { client, redirectUri }
+const PROVIDERS = {
+  custom: { client: OAUTH_CUSTOM, redirectUri: `${OAUTH_REDIRECT_BASE}/custom/callback` },
+  google: { client: OAUTH_GOOGLE, redirectUri: `${OAUTH_REDIRECT_BASE}/google/callback` },
+};
 
 function b64url(buf) {
   return Buffer.from(buf).toString('base64url');
 }
 
-function buildAuthorizeURL(state, codeChallenge) {
+function buildAuthorizeURL(providerKey, state, codeChallenge) {
+  const { client, redirectUri } = PROVIDERS[providerKey];
   const params = new URLSearchParams({
-    client_id: OAUTH_CLIENT_ID,
-    redirect_uri: OAUTH_REDIRECT_URI,
+    client_id: client.clientId,
+    redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'openid email profile',
     state,
@@ -33,13 +42,14 @@ function createState() {
   return b64url(crypto.randomBytes(24));
 }
 
-async function exchangeCode(code, codeVerifier) {
+async function exchangeCode(providerKey, code, codeVerifier) {
+  const { client, redirectUri } = PROVIDERS[providerKey];
   const form = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
-    client_id: OAUTH_CLIENT_ID,
-    client_secret: OAUTH_CLIENT_SECRET,
-    redirect_uri: OAUTH_REDIRECT_URI,
+    client_id: client.clientId,
+    client_secret: client.clientSecret,
+    redirect_uri: redirectUri,
     code_verifier: codeVerifier,
   });
 
@@ -57,12 +67,13 @@ async function exchangeCode(code, codeVerifier) {
 }
 
 // Verifies the RS256 ID token against the IdP's JWKS and returns its claims.
-async function verifyIDToken(idToken) {
+async function verifyIDToken(providerKey, idToken) {
+  const { client } = PROVIDERS[providerKey];
   const { payload } = await jwtVerify(idToken, JWKS, {
     issuer: OAUTH_ISSUER,
-    audience: OAUTH_CLIENT_ID,
+    audience: client.clientId,
   });
   return payload;
 }
 
-module.exports = { buildAuthorizeURL, createPKCE, createState, exchangeCode, verifyIDToken };
+module.exports = { PROVIDERS, buildAuthorizeURL, createPKCE, createState, exchangeCode, verifyIDToken };

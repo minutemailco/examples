@@ -51,11 +51,15 @@ app.post('/signup', async (req, res) => {
 
 app.get('/verify/:token', (req, res) => {
   const email = store.consumeVerificationToken(req.params.token);
-  if (!email || !store.findUser(email)) {
+  const user = email ? store.findUser(email) : null;
+  if (!user) {
     return res.status(400).send(views.oauthError('This verification link is invalid or has already been used.'));
   }
   store.markVerified(email);
-  res.send(views.verified());
+  // Auto-login after successful verification — for both the password and the
+  // custom-IdP flow the user has just proven control of the mailbox.
+  startSession(res, email);
+  res.redirect('/dashboard');
 });
 
 app.get('/login', (req, res) => res.send(views.login()));
@@ -85,16 +89,15 @@ app.post('/logout', (req, res) => {
   res.redirect('/');
 });
 
-// --- OAuth (mock IdP, authorization code + PKCE S256) ---
+// --- OAuth: two providers, different verification behavior ---
+//
+// custom  — the IdP reports email_verified from the identity. The demo
+//           identity is created with emailVerified: false, so the first
+//           login sends a verification email and gates the dashboard on it.
+// google  — faithful to real Google: email_verified: true in the token,
+//           no verification step, fixed claim set (no custom roles).
 
-app.get('/auth/google', (req, res) => {
-  const { verifier, challenge } = oauth.createPKCE();
-  const state = oauth.createState();
-  store.setOAuthState(state, verifier);
-  res.redirect(oauth.buildAuthorizeURL(state, challenge));
-});
-
-app.get('/auth/callback', async (req, res) => {
+async function handleOAuthLogin(req, res, providerKey) {
   const { code, state, error, error_description: errorDescription } = req.query;
 
   if (error) {
@@ -106,32 +109,54 @@ app.get('/auth/callback', async (req, res) => {
   }
 
   try {
-    const tokens = await oauth.exchangeCode(code, verifier);
-    const claims = await oauth.verifyIDToken(tokens.id_token);
+    const tokens = await oauth.exchangeCode(providerKey, code, verifier);
+    const claims = await oauth.verifyIDToken(providerKey, tokens.id_token);
 
     const user = store.upsertOAuthUser({
       sub: claims.sub,
       email: claims.email,
-      name: claims.name,
-      emailVerified: claims.email_verified,
-      preferredUsername: claims.preferred_username,
+      name: claims.name || claims.email,
+      emailVerified: claims.email_verified === true || claims.email_verified === 'true',
       picture: claims.picture,
+      preferredUsername: claims.preferred_username,
+      provider: providerKey,
       claims: customClaims(claims),
     });
+
+    const verificationRequired = providerKey === 'custom' && !user.emailVerified;
+    if (verificationRequired) {
+      // Custom IdP, unverified identity: send the verification email and
+      // hold the login until the link is followed.
+      const token = crypto.randomBytes(24).toString('base64url');
+      store.setVerificationToken(user.email, token);
+      await mailer.sendVerificationEmail(user.email, token);
+      return res.send(views.checkYourEmail(user.email));
+    }
+
     startSession(res, user.email);
     res.redirect('/dashboard');
   } catch (err) {
     console.error('[oauth] callback failed:', err.message);
     res.status(502).send(views.oauthError(err.message));
   }
-});
+}
 
-// Standard OIDC + provider claim names (Google/Apple fixed claim sets) —
-// anything else is treated as a custom claim (custom-provider feature).
+for (const providerKey of ['custom', 'google']) {
+  app.get(`/auth/${providerKey}`, (req, res) => {
+    const { verifier, challenge } = oauth.createPKCE();
+    const state = oauth.createState();
+    store.setOAuthState(state, verifier);
+    res.redirect(oauth.buildAuthorizeURL(providerKey, state, challenge));
+  });
+  app.get(`/auth/${providerKey}/callback`, (req, res) => handleOAuthLogin(req, res, providerKey));
+}
+
+// Standard OIDC + provider fixed claim names (Google/Apple sets) — anything
+// else is treated as a custom claim (a custom-provider feature).
 const RESERVED = new Set([
-  'iss', 'sub', 'aud', 'exp', 'iat', 'nbf', 'jti', 'nonce', 'at_hash',
+  'iss', 'sub', 'aud', 'azp', 'exp', 'iat', 'nbf', 'jti', 'nonce', 'at_hash',
   'email', 'email_verified', 'name', 'preferred_username', 'picture',
-  'azp', 'given_name', 'family_name', 'locale', 'hd',
+  'given_name', 'family_name', 'locale', 'hd',
   'is_private_email', 'real_user_status',
 ]);
 function customClaims(claims) {
@@ -144,5 +169,5 @@ function customClaims(claims) {
 
 app.listen(config.PORT, () => {
   console.log(`SignupFlow demo app listening on ${config.BASE_URL}`);
-  console.log(`OAuth issuer: ${config.OAUTH_ISSUER}`);
+  console.log(`OAuth issuer: ${config.OAUTH_ISSUER} (custom + google clients)`);
 });

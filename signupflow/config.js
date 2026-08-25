@@ -9,13 +9,20 @@ const required = (name) => {
   return value;
 };
 
+// Two mock-IdP clients: a custom provider (email verification required) and
+// Google (no verification — real Google reports email_verified directly).
+const oauthClient = (prefix) => ({
+  clientId: required(`${prefix}_CLIENT_ID`),
+  clientSecret: required(`${prefix}_CLIENT_SECRET`),
+});
+
 module.exports = {
   PORT: process.env.PORT || 3000,
   BASE_URL: process.env.BASE_URL || 'http://localhost:3000',
   MINUTEMAIL_API_BASE: required('MINUTEMAIL_API_BASE'),
   MINUTEMAIL_API_KEY: required('MINUTEMAIL_API_KEY'),
   OAUTH_ISSUER: required('OAUTH_ISSUER'),
-  OAUTH_CLIENT_ID: required('OAUTH_CLIENT_ID'),
-  OAUTH_CLIENT_SECRET: required('OAUTH_CLIENT_SECRET'),
-  OAUTH_REDIRECT_URI: process.env.OAUTH_REDIRECT_URI || 'http://localhost:3000/auth/callback',
+  OAUTH_CUSTOM: oauthClient('OAUTH_CUSTOM'),
+  OAUTH_GOOGLE: oauthClient('OAUTH_GOOGLE'),
+  OAUTH_REDIRECT_BASE: process.env.OAUTH_REDIRECT_BASE || 'http://localhost:3000/auth',
 };
