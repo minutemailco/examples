@@ -28,18 +28,22 @@ oauth.clients.create
 ```
 
 Create an identity bound to a **permanent** mailbox (so it survives between
-runs), then optionally enrich it with roles/claims and email-verification
-state:
+runs). Note: the app uses a **google** client — and just like real Google,
+the mock IdP issues a fixed claim set for it. Custom claims (roles, plans)
+are only available on `custom` provider clients:
 
 ```
 identities.create
   { clientId: "<from above>", mailboxAddress: "<permanent mailbox>",
     username: "ada", name: "Ada Test" }
+```
 
+Optional — flip the email-verification state to test both branches
+(works on every provider type, unlike custom claims):
+
+```
 identities.update
-  { identityId: "<from above>",
-    claims: { role: "admin", plan: "pro" },
-    emailVerified: true }
+  { identityId: "<from above>", emailVerified: false }
 ```
 
 ### 2. Configure

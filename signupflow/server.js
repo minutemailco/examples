@@ -126,10 +126,13 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
-// Everything except the standard OIDC claims is treated as a custom claim.
+// Standard OIDC + provider claim names (Google/Apple fixed claim sets) —
+// anything else is treated as a custom claim (custom-provider feature).
 const RESERVED = new Set([
   'iss', 'sub', 'aud', 'exp', 'iat', 'nbf', 'jti', 'nonce', 'at_hash',
   'email', 'email_verified', 'name', 'preferred_username', 'picture',
+  'azp', 'given_name', 'family_name', 'locale', 'hd',
+  'is_private_email', 'real_user_status',
 ]);
 function customClaims(claims) {
   const out = {};
